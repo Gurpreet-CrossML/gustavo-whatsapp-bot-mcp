@@ -152,7 +152,7 @@ async function handleGetProducts(customerCode, productNames) {
             let matchCount = 0;
             let exactMatches = 0;
 
-            // Penalty for no description: Helps prioritize real products over empty placeholders
+            // Penalty for no description
             const noDescriptionPenalty = description.trim() === "" ? 1 : 0;
 
             tokens.forEach(t => {
@@ -166,7 +166,6 @@ async function handleGetProducts(customerCode, productNames) {
         refinedMatches.sort((a, b) => {
             if (b.exactMatchCount !== a.exactMatchCount) return b.exactMatchCount - a.exactMatchCount;
             if (b.matchCount !== a.matchCount) return b.matchCount - a.matchCount;
-            // Higher priority for items WITH a description
             if (a.noDescriptionPenalty !== b.noDescriptionPenalty) return a.noDescriptionPenalty - b.noDescriptionPenalty;
             return a.score - b.score;
         });
@@ -178,10 +177,17 @@ async function handleGetProducts(customerCode, productNames) {
 
             finalProducts = refinedMatches
                 .filter(r => r.exactMatchCount === maxExact && r.matchCount === maxMatches && r.noDescriptionPenalty === minPenalty)
-                .map(r => r.item);
+                .map(r => {
+                    const numericScore = (1 - r.score) * 100;
+                    return {
+                        ...r.item,
+                        score: numericScore,
+                        scoreFormatted: numericScore.toFixed(1) + "%"
+                    };
+                });
         }
 
-        // Return formated sub-result
+        // Return formatted sub-result
         if (finalProducts.length > 1) {
             return {
                 searchTerm: productName,
