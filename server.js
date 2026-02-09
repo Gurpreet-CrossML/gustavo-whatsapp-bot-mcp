@@ -5,7 +5,7 @@ const { z } = require("zod");
 const axios = require("axios");
 const dotenv = require("dotenv");
 const express = require("express");
-const { CohereClient } = require("cohere-ai");
+const Fuse = require("fuse.js");
 
 // Load environment variables
 dotenv.config();
@@ -23,10 +23,6 @@ if (!API_BASE_URL) {
 const server = new McpServer({
     name: "Cortes54 Order Assistant",
     version: "1.0.0",
-});
-
-const cohere = new CohereClient({
-    token: process.env.COHERE_API_KEY,
 });
 
 // --- API Helper ---
@@ -104,99 +100,103 @@ async function handleGetProducts(customerCode, productNames) {
         };
     }
 
-    // Map products to text for Rerank
-    const documents = products.map(p => {
-        const aliasStr = Array.isArray(p.Alias) ? p.Alias.join(" ") : "";
-        return `${p.Description} ${aliasStr}`;
+    const fuse = new Fuse(products, {
+        keys: ["Description", "Alias"],
+        threshold: 0.3,
+        ignoreLocation: true,
+        includeScore: true,
+        useExtendedSearch: true
     });
 
-    // Process in batches of 5 with a 6-second delay
-    const resultsMap = [];
-    const batchSize = 5;
-    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    const STOPWORDS = ["di", "del", "della", "dei", "delle", "il", "lo", "la", "i", "gli", "le", "un", "uno", "una", "con", "per", "a", "da", "in", "su", "de"];
+    const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-    for (let i = 0; i < namesArray.length; i += batchSize) {
-        const batch = namesArray.slice(i, i + batchSize);
+    const resultsMap = namesArray.map(productName => {
+        let finalProducts = [];
 
-        // If not the first batch, wait for 6 seconds
-        if (i > 0) {
-            console.log(`Waiting 6 seconds before next batch...`);
-            await sleep(6000);
+        // --- SMART SEARCH LOGIC (PER PRODUCT NAME) ---
+        const normalizedName = normalize(productName);
+        const tokens = normalizedName.trim().split(/\s+/)
+            .filter(token => !STOPWORDS.includes(token.toLowerCase()));
+
+        const queryTerms = tokens.map(token => {
+            return token.length <= 3 ? `'${token}` : token;
+        });
+        const queryString = queryTerms.join(' ');
+
+        let candidates = [];
+        if (queryString) {
+            candidates = fuse.search(queryString);
         }
 
-        const batchResults = await Promise.all(batch.map(async (productName) => {
-            let finalProducts = [];
+        // Fallback A: Exact First Word
+        if (candidates.length === 0 && queryTerms.length > 1) {
+            candidates = fuse.search(queryTerms[0]);
+        }
 
-            try {
-                const rerank = await cohere.rerank({
-                    model: "rerank-v3.5",
-                    query: productName,
-                    documents: documents,
-                    topN: 5,
-                });
-
-                // Tiered filtering logic
-                // 1. Try high confidence matches first (>= 0.6)
-                let highConfidenceMatches = rerank.results.filter(r => r.relevanceScore >= 0.6);
-                let candidates = [];
-
-                // 2. Fallback to lower threshold (>= 0.3) if no high confidence matches
-                if (highConfidenceMatches.length === 0) {
-                    candidates = rerank.results.filter(r => r.relevanceScore >= 0.3);
-                } else {
-                    candidates = highConfidenceMatches;
-                }
-
-                // --- TOKEN REFINEMENT STEP ---
-                const normalizeFunc = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-                const queryTokens = normalizeFunc(productName).split(/\s+/).filter(t => t.length > 2);
-
-                candidates = candidates.map(c => {
-                    const product = products[c.index];
-                    const productText = normalizeFunc(`${product.Description} ${product.Alias ? product.Alias.join(" ") : ""}`);
-                    const matchCount = queryTokens.reduce((acc, token) => {
-                        return productText.includes(token) ? acc + 1 : acc;
-                    }, 0);
-                    return { ...c, matchCount };
-                });
-
-                if (candidates.length > 0) {
-                    const maxMatch = Math.max(...candidates.map(c => c.matchCount));
-                    if (maxMatch > 0) {
-                        candidates = candidates.filter(c => c.matchCount === maxMatch);
-                    }
-                }
-
-                finalProducts = candidates.map(r => {
-                    const product = products[r.index];
-                    return {
-                        ...product,
-                        score: (r.relevanceScore * 100).toFixed(1) + "%"
-                    };
-                });
-            } catch (error) {
-                console.error("Cohere Rerank Error:", error);
+        // Fallback B: Best Subset Match (OR Search)
+        if (candidates.length === 0) {
+            const meaningfulTokens = tokens.filter(t => t.length > 3);
+            if (meaningfulTokens.length > 0) {
+                const orQuery = meaningfulTokens.join(" | ");
+                candidates = fuse.search(orQuery);
             }
+        }
 
-            // Return formatted sub-result
-            if (finalProducts.length > 1) {
-                return {
-                    searchTerm: productName,
-                    status: "success",
-                    message: `There are multiple products found for "${productName}", first you need to match with the "${productName}", if there are very similar product then you should ask to user`,
-                    data: finalProducts
-                };
-            } else {
-                return {
-                    searchTerm: productName,
-                    status: "success",
-                    message: finalProducts.length === 1 ? "Single Product found" : "No products found",
-                    data: finalProducts
-                };
-            }
-        }));
-        resultsMap.push(...batchResults);
-    }
+        // Global Refinement & Ranking
+        const refinedMatches = candidates.map(c => {
+            const description = c.item.Description || "";
+            const aliases = (c.item.Alias || []).join(" ");
+            const itemStr = normalize(description + " " + aliases).toLowerCase();
+            const itemWords = itemStr.split(/\s+/);
+            let matchCount = 0;
+            let exactMatches = 0;
+
+            // Penalty for no description
+            const noDescriptionPenalty = description.trim() === "" ? 1 : 0;
+
+            tokens.forEach(t => {
+                const cleanT = t.toLowerCase();
+                if (itemStr.includes(cleanT)) matchCount++;
+                if (itemWords.includes(cleanT)) exactMatches++;
+            });
+            return { ...c, matchCount, exactMatchCount: exactMatches, noDescriptionPenalty };
+        });
+
+        refinedMatches.sort((a, b) => {
+            if (b.exactMatchCount !== a.exactMatchCount) return b.exactMatchCount - a.exactMatchCount;
+            if (b.matchCount !== a.matchCount) return b.matchCount - a.matchCount;
+            if (a.noDescriptionPenalty !== b.noDescriptionPenalty) return a.noDescriptionPenalty - b.noDescriptionPenalty;
+            return a.score - b.score;
+        });
+
+        if (refinedMatches.length > 0) {
+            const maxExact = refinedMatches[0].exactMatchCount;
+            const maxMatches = refinedMatches[0].matchCount;
+            const minPenalty = refinedMatches[0].noDescriptionPenalty;
+
+            finalProducts = refinedMatches
+                .filter(r => r.exactMatchCount === maxExact && r.matchCount === maxMatches && r.noDescriptionPenalty === minPenalty)
+                .map(r => ({ ...r.item, score: ((1 - r.score) * 100).toFixed(1) + "%" }));
+        }
+
+        // Return formatted sub-result
+        if (finalProducts.length > 1) {
+            return {
+                searchTerm: productName,
+                status: "success",
+                message: `There are multiple products found for "${productName}", first you need to match with the "${productName}", if there are very similar product then you should ask to user`,
+                data: finalProducts
+            };
+        } else {
+            return {
+                searchTerm: productName,
+                status: "success",
+                message: finalProducts.length === 1 ? "Single Product found" : "No products found",
+                data: finalProducts
+            };
+        }
+    });
 
     // If only one product was searched, return it directly to maintain backward compatibility for simple calls
     if (namesArray.length === 1) return resultsMap[0];
