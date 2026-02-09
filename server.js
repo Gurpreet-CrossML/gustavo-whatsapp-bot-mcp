@@ -6,6 +6,7 @@ const axios = require("axios");
 const dotenv = require("dotenv");
 const express = require("express");
 const Fuse = require("fuse.js");
+const { getMatchingProducts } = require("./cohere-call.js");
 
 // Load environment variables
 dotenv.config();
@@ -100,118 +101,131 @@ async function handleGetProducts(customerCode, productNames) {
         };
     }
 
-    const fuse = new Fuse(products, {
-        keys: ["Description", "Alias"],
-        threshold: 0.3,
-        ignoreLocation: true,
-        includeScore: true,
-        useExtendedSearch: true
-    });
-
-    const STOPWORDS = ["di", "del", "della", "dei", "delle", "il", "lo", "la", "i", "gli", "le", "un", "uno", "una", "con", "per", "a", "da", "in", "su", "de"];
-    const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-
-    const resultsMap = namesArray.map(productName => {
-        let finalProducts = [];
-
-        // --- SMART SEARCH LOGIC (PER PRODUCT NAME) ---
-        const normalizedName = normalize(productName);
-        const tokens = normalizedName.trim().split(/\s+/)
-            .filter(token => !STOPWORDS.includes(token.toLowerCase()));
-
-        const queryTerms = tokens.map(token => {
-            return token.length <= 3 ? `'${token}` : token;
+    // --- COHERE CALL LOGIC ---
+    try{
+        const cohereResults = await getMatchingProducts(products, namesArray);
+        return {
+            status: "success",
+            message: "Matching products retrieved, verify multiple matches from user.",
+            data: cohereResults
+        };
+    } catch (error) {
+        console.error("Error in Cohere matching:", error);
+    
+        const fuse = new Fuse(products, {
+            keys: ["Description", "Alias"],
+            threshold: 0.3,
+            ignoreLocation: true,
+            includeScore: true,
+            useExtendedSearch: true
         });
-        const queryString = queryTerms.join(' ');
 
-        let candidates = [];
-        if (queryString) {
-            candidates = fuse.search(queryString);
-        }
+        const STOPWORDS = ["di", "del", "della", "dei", "delle", "il", "lo", "la", "i", "gli", "le", "un", "uno", "una", "con", "per", "a", "da", "in", "su", "de"];
+        const normalize = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-        // Fallback A: Exact First Word
-        if (candidates.length === 0 && queryTerms.length > 1) {
-            candidates = fuse.search(queryTerms[0]);
-        }
+        const resultsMap = namesArray.map(productName => {
+            let finalProducts = [];
 
-        // Fallback B: Best Subset Match (OR Search)
-        if (candidates.length === 0) {
-            const meaningfulTokens = tokens.filter(t => t.length > 3);
-            if (meaningfulTokens.length > 0) {
-                const orQuery = meaningfulTokens.join(" | ");
-                candidates = fuse.search(orQuery);
-            }
-        }
+            // --- SMART SEARCH LOGIC (PER PRODUCT NAME) ---
+            const normalizedName = normalize(productName);
+            const tokens = normalizedName.trim().split(/\s+/)
+                .filter(token => !STOPWORDS.includes(token.toLowerCase()));
 
-        // Global Refinement & Ranking
-        const refinedMatches = candidates.map(c => {
-            const description = c.item.Description || "";
-            const aliases = (c.item.Alias || []).join(" ");
-            const itemStr = normalize(description + " " + aliases).toLowerCase();
-            const itemWords = itemStr.split(/\s+/);
-            let matchCount = 0;
-            let exactMatches = 0;
-
-            // Penalty for no description
-            const noDescriptionPenalty = description.trim() === "" ? 1 : 0;
-
-            tokens.forEach(t => {
-                const cleanT = t.toLowerCase();
-                if (itemStr.includes(cleanT)) matchCount++;
-                if (itemWords.includes(cleanT)) exactMatches++;
+            const queryTerms = tokens.map(token => {
+                return token.length <= 3 ? `'${token}` : token;
             });
-            return { ...c, matchCount, exactMatchCount: exactMatches, noDescriptionPenalty };
-        });
+            const queryString = queryTerms.join(' ');
 
-        refinedMatches.sort((a, b) => {
-            if (b.exactMatchCount !== a.exactMatchCount) return b.exactMatchCount - a.exactMatchCount;
-            if (b.matchCount !== a.matchCount) return b.matchCount - a.matchCount;
-            if (a.noDescriptionPenalty !== b.noDescriptionPenalty) return a.noDescriptionPenalty - b.noDescriptionPenalty;
-            return a.score - b.score;
-        });
+            let candidates = [];
+            if (queryString) {
+                candidates = fuse.search(queryString);
+            }
 
-        if (refinedMatches.length > 0) {
-            const maxExact = refinedMatches[0].exactMatchCount;
-            const maxMatches = refinedMatches[0].matchCount;
-            const minPenalty = refinedMatches[0].noDescriptionPenalty;
+            // Fallback A: Exact First Word
+            if (candidates.length === 0 && queryTerms.length > 1) {
+                candidates = fuse.search(queryTerms[0]);
+            }
 
-            finalProducts = refinedMatches
-                .filter(r => r.exactMatchCount === maxExact && r.matchCount === maxMatches && r.noDescriptionPenalty === minPenalty)
-                .map(r => {
-                    const numericScore = (1 - r.score) * 100;
-                    return {
-                        ...r.item,
-                        score: numericScore,
-                        scoreFormatted: numericScore.toFixed(1) + "%"
-                    };
+            // Fallback B: Best Subset Match (OR Search)
+            if (candidates.length === 0) {
+                const meaningfulTokens = tokens.filter(t => t.length > 3);
+                if (meaningfulTokens.length > 0) {
+                    const orQuery = meaningfulTokens.join(" | ");
+                    candidates = fuse.search(orQuery);
+                }
+            }
+
+            // Global Refinement & Ranking
+            const refinedMatches = candidates.map(c => {
+                const description = c.item.Description || "";
+                const aliases = (c.item.Alias || []).join(" ");
+                const itemStr = normalize(description + " " + aliases).toLowerCase();
+                const itemWords = itemStr.split(/\s+/);
+                let matchCount = 0;
+                let exactMatches = 0;
+
+                // Penalty for no description
+                const noDescriptionPenalty = description.trim() === "" ? 1 : 0;
+
+                tokens.forEach(t => {
+                    const cleanT = t.toLowerCase();
+                    if (itemStr.includes(cleanT)) matchCount++;
+                    if (itemWords.includes(cleanT)) exactMatches++;
                 });
-        }
+                return { ...c, matchCount, exactMatchCount: exactMatches, noDescriptionPenalty };
+            });
 
-        // Return formatted sub-result
-        if (finalProducts.length > 1) {
-            return {
-                searchTerm: productName,
-                status: "success",
-                message: `There are multiple products found for "${productName}", first you need to match with the "${productName}", if there are very similar product then you should ask to user`,
-                data: finalProducts
-            };
-        } else {
-            return {
-                searchTerm: productName,
-                status: "success",
-                message: finalProducts.length === 1 ? "Single Product found" : "No products found",
-                data: finalProducts
-            };
-        }
-    });
+            refinedMatches.sort((a, b) => {
+                if (b.exactMatchCount !== a.exactMatchCount) return b.exactMatchCount - a.exactMatchCount;
+                if (b.matchCount !== a.matchCount) return b.matchCount - a.matchCount;
+                if (a.noDescriptionPenalty !== b.noDescriptionPenalty) return a.noDescriptionPenalty - b.noDescriptionPenalty;
+                return a.score - b.score;
+            });
 
-    // If only one product was searched, return it directly to maintain backward compatibility for simple calls
-    if (namesArray.length === 1) return resultsMap[0];
+            if (refinedMatches.length > 0) {
+                const maxExact = refinedMatches[0].exactMatchCount;
+                const maxMatches = refinedMatches[0].matchCount;
+                const minPenalty = refinedMatches[0].noDescriptionPenalty;
 
-    return {
-        status: "success",
-        batchResults: resultsMap
-    };
+                finalProducts = refinedMatches
+                    .filter(r => r.exactMatchCount === maxExact && r.matchCount === maxMatches && r.noDescriptionPenalty === minPenalty)
+                    .map(r => {
+                        const numericScore = (1 - r.score) * 100;
+                        return {
+                            ...r.item,
+                            score: numericScore,
+                            scoreFormatted: numericScore.toFixed(1) + "%"
+                        };
+                    });
+            }
+
+            // Return formatted sub-result
+            if (finalProducts.length > 1) {
+                return {
+                    searchTerm: productName,
+                    status: "success",
+                    message: `There are multiple products found for "${productName}", first you need to match with the "${productName}", if there are very similar product then you should ask to user`,
+                    data: finalProducts
+                };
+            } else {
+                return {
+                    searchTerm: productName,
+                    status: "success",
+                    message: finalProducts.length === 1 ? "Single Product found" : "No products found",
+                    data: finalProducts
+                };
+            }
+        });
+
+        // If only one product was searched, return it directly to maintain backward compatibility for simple calls
+        if (namesArray.length === 1) return resultsMap[0];
+
+        return {
+            status: "success",
+            message: "Batch processing completed for multiple product names.",
+            data: resultsMap
+        };
+    }
 }
 
 async function handlePlaceOrder(orderData) {
@@ -263,7 +277,7 @@ server.tool(
     "Fetch list of products available for a customer (supports single name or array of names).",
     {
         customerCode: z.coerce.number().describe("Customer code"),
-        productName: z.union([z.string(), z.array(z.string())]).optional().describe("Product name(s) to search"),
+        productName: z.union([z.array(z.string())]).describe("Product name(s) to search"),
     },
     async ({ customerCode, productName }) => {
         try {
