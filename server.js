@@ -177,7 +177,14 @@ async function handleGetProducts(customerCode, productNames) {
 
             finalProducts = refinedMatches
                 .filter(r => r.exactMatchCount === maxExact && r.matchCount === maxMatches && r.noDescriptionPenalty === minPenalty)
-                .map(r => ({ ...r.item, score: ((1 - r.score) * 100).toFixed(1) + "%" }));
+                .map(r => {
+                    const numericScore = (1 - r.score) * 100;
+                    return {
+                        ...r.item,
+                        score: numericScore,
+                        scoreFormatted: numericScore.toFixed(1) + "%"
+                    };
+                });
         }
 
         // Return formatted sub-result
