@@ -6,7 +6,7 @@ const axios = require("axios");
 const dotenv = require("dotenv");
 const express = require("express");
 const Fuse = require("fuse.js");
-const { getMatchingProducts } = require("./cohere-call.js");
+const { getMatchingProducts } = require("./openai-call.js");
 
 // Load environment variables
 dotenv.config();
@@ -101,7 +101,7 @@ async function handleGetProducts(customerCode, productNames) {
         };
     }
 
-    // --- COHERE CALL LOGIC ---
+    // --- OPENAI CALL LOGIC ---
     try{
         const cohereResults = await getMatchingProducts(products, namesArray);
         return {
@@ -222,7 +222,7 @@ async function handleGetProducts(customerCode, productNames) {
 
         return {
             status: "success",
-            message: "Batch processing completed for multiple product names.",
+            message: "Batch processing completed for multiple product names, verify multiple matches from user.",
             data: resultsMap
         };
     }
