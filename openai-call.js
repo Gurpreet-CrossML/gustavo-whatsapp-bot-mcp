@@ -62,8 +62,10 @@ If user searches for "bon o bon nero" and best match is 70:
 [
   {"code": "001817", "description": "BOMBON BON O BON LECHE", "alias": [], "score": 70},
 ]
-
-The description field in the FastOrder_Generico entry must NEVER be "FastOrder_Generico" - it must be the user's search text.
+If user searches for "bon o bon nero" and best match is 100:
+[
+  {"code": "001818", "description": "BOMBON BON O BON NERO", "alias": [], "score": 100},
+]
 `;
 
 async function getMatchingProducts(products, userProducts) {
