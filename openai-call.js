@@ -37,13 +37,8 @@ You are a product matching assistant. Match the user's inquiry to items in the p
    - Below 50: Poor match.
 4. Return logic:
    - If best match score >= 95: Return only those high-scoring matches.
-   - If best match score < 95: Return all matches AND add one additional entry at the end.
+   - If best match score < 95: Return all matches.
 
-**For the additional entry when score < 95:**
-- Set "code" to: FastOrder_Generico
-- Set "description" to: THE EXACT TEXT THE USER SEARCHED FOR (copy it verbatim)
-- Set "alias" to: empty array []
-- Set "score" to: 0
 
 **Output Format (JSON only, no markdown, no extra text):**
 [
@@ -61,16 +56,16 @@ If user searches for "alfajores Nero clásico" and best match is 70:
 [
   {"code": "006478", "description": "ALFAJORES MERENGUE CLASICO HAVANNA (1 x 12)", "alias": [], "score": 70},
   {"code": "006477", "description": "ALFAJORES MERENGUE CLASICO HAVANNA (1 x 6)", "alias": [], "score": 70},
-  {"code": "FastOrder_Generico", "description": "alfajores Nero clásico", "alias": [], "score": 0}
 ]
 
 If user searches for "bon o bon nero" and best match is 70:
 [
   {"code": "001817", "description": "BOMBON BON O BON LECHE", "alias": [], "score": 70},
-  {"code": "FastOrder_Generico", "description": "bon o bon nero", "alias": [], "score": 0}
 ]
-
-The description field in the FastOrder_Generico entry must NEVER be "FastOrder_Generico" - it must be the user's search text.
+If user searches for "bon o bon nero" and best match is 100:
+[
+  {"code": "001818", "description": "BOMBON BON O BON NERO", "alias": [], "score": 100},
+]
 `;
 
 async function getMatchingProducts(products, userProducts) {
