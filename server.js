@@ -280,7 +280,7 @@ server.tool(
         - 0 → Customer has only one destination. Proceed directly.
         - 1 → Customer has multiple destinations. You MUST ask the user to select destination before fetching products.
     `,
-    { name: z.string().describe("Customer name exactly as written").required() },
+    { name: z.string().describe("Customer name exactly as written") },
     async ({ name }) => {
         try {
             const result = await handleGetCustomers(name);
@@ -323,7 +323,7 @@ server.tool(
         - false → This is not the default destination.
 
     `,
-    { code: z.union([z.number(), z.string()]).transform((val) => Number(val)).describe("Customer code").required() },
+    { code: z.union([z.number(), z.string()]).transform((val) => Number(val)).describe("Customer code") },
     async ({ code }) => {
         try {
             const result = await handleGetDestinations(code);
@@ -369,8 +369,8 @@ server.tool(
     If no matches are found, an empty list is returned.
     `,
     {
-        customerCode: z.coerce.number().describe("Customer code").required(),
-        productName: z.union([z.string(), z.array(z.string())]).describe("Product name(s) to search").required(),
+        customerCode: z.coerce.number().describe("Customer code"),
+        productName: z.union([z.string(), z.array(z.string())]).describe("Product name(s) to search"),
     },
     async ({ customerCode, productName }) => {
         try {
@@ -422,9 +422,9 @@ server.tool(
     If no matches are found, an empty list is returned.
     `,
     {
-        customerCode: z.coerce.number().describe("Customer code").required(),
-        destinationId: z.coerce.number().describe("Destination ID to filter products").required(),
-        productName: z.union([z.string(), z.array(z.string())]).describe("Product name(s) to search").required(),
+        customerCode: z.coerce.number().describe("Customer code"),
+        destinationId: z.coerce.number().describe("Destination ID to filter products"),
+        productName: z.union([z.string(), z.array(z.string())]).describe("Product name(s) to search"),
     },
     async ({ customerCode, destinationId, productName }) => {
         try {
@@ -470,15 +470,15 @@ server.tool(
     Important: Always confirm all order details (customer, destination, items, quantities) with the customer before calling this tool.
     Once submitted, the order cannot be modified through this tool - contact support for changes.
      `,
-    {
-        customerCode: z.number().describe("Customer code").required(),
-        destinationId: z.number().describe("Destination ID").required(),
+        {
+        customerCode: z.number().describe("Customer code"),
+        destinationId: z.number().describe("Destination ID"),
         items: z.array(z.object({
-            itemCode: z.string().describe("Code").required(),
-            itemDescription: z.string().describe("Description").required(),
-            um: z.string().describe("Unit").required(),
-            qty: z.number().describe("Qty").required(),
-        })).describe("Items").required(),
+            itemCode: z.string().describe("Code"),
+            itemDescription: z.string().describe("Description"),
+            um: z.string().describe("Unit"),
+            qty: z.number().describe("Qty"),
+        })).describe("Items"),
     },
     async (orderData) => {
         try {
