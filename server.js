@@ -84,14 +84,15 @@ async function handleGetDestinations(code) {
         : destinations;
 }
 
-async function handleGetProducts(customerCode, productNames) {
+async function handleGetProducts(customerCode, destinationId, productNames) {
     if (!customerCode) throw new Error("Customer code is required");
+    if (!destinationId) throw new Error("Destination ID is required");
 
     // Normalize productNames to an array
     const namesArray = Array.isArray(productNames) ? productNames : [productNames].filter(Boolean);
 
-    // WaBot_listProd.asp?customerCode=...
-    const products = await callApi("WaBot_listProd.asp", "GET", null, { customerCode });
+    // WaBot_listProd.asp?customerCode=...&destinationId=...
+    const products = await callApi("WaBot_listProd.asp", "GET", null, { customerCode, destinationId });
 
     if (namesArray.length === 0) {
         return {
@@ -277,11 +278,12 @@ server.tool(
     "Fetch list of products available for a customer (supports single name or array of names).",
     {
         customerCode: z.coerce.number().describe("Customer code"),
+        destinationId: z.coerce.number().describe("Destination ID"),
         productName: z.union([z.array(z.string())]).describe("Product name(s) to search"),
     },
-    async ({ customerCode, productName }) => {
+    async ({ customerCode, destinationId, productName }) => {
         try {
-            const result = await handleGetProducts(customerCode, productName);
+            const result = await handleGetProducts(customerCode, destinationId, productName);
             return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
         } catch (error) {
             return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
@@ -351,11 +353,11 @@ app.get("/destinations", async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /products?customerCode=419&productName=A&productName=B
+// GET /products?customerCode=419&destinationId=1&productName=A&productName=B
 app.get("/products", async (req, res) => {
     try {
         // req.query.productName will be an array if multiple are passed, or a string if one is passed.
-        res.json(await handleGetProducts(req.query.customerCode, req.query.productName));
+        res.json(await handleGetProducts(req.query.customerCode, req.query.destinationId, req.query.productName));
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
