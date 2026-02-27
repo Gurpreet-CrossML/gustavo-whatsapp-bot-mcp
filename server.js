@@ -84,20 +84,25 @@ async function handleGetDestinations(code) {
         : destinations;
 }
 
-async function handleGetProducts(customerCode, destinationId, productNames) {
+async function handleGetProducts(customerCode, productNames, destinationId = null) {
     if (!customerCode) throw new Error("Customer code is required");
-    if (!destinationId) throw new Error("Destination ID is required");
 
     // Normalize productNames to an array
     const namesArray = Array.isArray(productNames) ? productNames : [productNames].filter(Boolean);
 
-    // WaBot_listProd.asp?customerCode=...&destinationId=...
-    const products = await callApi("WaBot_listProd.asp", "GET", null, { customerCode, destinationId });
+    // Build params object - include destinationId if provided
+    const params = { customerCode };
+    if (destinationId) {
+        params.destinationId = destinationId;
+    }
+
+    // WaBot_listProd.asp?customerCode=...&destinationId=... (optional)
+    const products = await callApi("WaBot_listProd.asp", "GET", null, params);
 
     if (namesArray.length === 0) {
         return {
             status: "success",
-            message: "No search terms provided, returning full catalog.",
+            message: "No search terms provided, returning full catalog for destination.",
             data: products
         };
     }
@@ -245,7 +250,10 @@ async function handlePlaceOrder(orderData) {
 // Tool: get_customer_details
 server.tool(
     "get_customer_details",
-    "Verify customer identity and fetch details including default destination.",
+    `Verify customer identity and fetch details including default destination.
+    Parameters:
+    @param {string} name - The name of the customer to fetch details for (exact match).
+    `,
     { name: z.string().describe("Customer name exactly as written") },
     async ({ name }) => {
         try {
@@ -260,8 +268,11 @@ server.tool(
 // Tool: get_customer_destinations
 server.tool(
     "get_customer_destinations",
-    "Fetch all destinations for a customer.",
-    { code: z.union([z.string(), z.number()]).transform((val) => Number(val)).describe("Customer code") },
+    `Fetch all destinations for a customer.
+    Parameters:
+    @param {number} code - The code of the customer to fetch destinations for.
+    `,
+    { code: z.union( z.number()).transform((val) => Number(val)).describe("Customer code") },
     async ({ code }) => {
         try {
             const result = await handleGetDestinations(code);
@@ -275,15 +286,68 @@ server.tool(
 // Tool: get_customer_products
 server.tool(
     "get_customer_products",
-    "Fetch list of products available for a customer (supports single name or array of names).",
+    `Fetch and search for products available for a specific customer.
+    
+    This tool retrieves the complete product catalog for a customer and optionally filters by product name(s).
+    It uses intelligent fuzzy search with fallback strategies to find matching products even with partial names or typos.
+    Results are ranked by relevance score, with exact matches prioritized.
+    
+    Use this tool when you need to:
+    - Browse all available products for a customer
+    - Search for products by name without destination filtering
+    - Get product details including descriptions, aliases, and pricing
+    
+    Parameters:
+    @param {number} customerCode - The unique code/ID of the customer to fetch products for.
+    @param {string|string[]} productName - The name(s) of the product(s) to search for. Can be a single string or an array of strings. If empty, returns full catalog.
+    
+    Returns: List of matching products with relevance scores, descriptions, and pricing information.
+    `,
     {
         customerCode: z.coerce.number().describe("Customer code"),
-        destinationId: z.coerce.number().describe("Destination ID"),
+        productName: z.union([z.array(z.string())]).describe("Product name(s) to search"),
+    },
+    async ({ customerCode, productName }) => {
+        try {
+            const result = await handleGetProducts(customerCode, productName);
+            return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        } catch (error) {
+            return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+    }
+);
+
+// Tool: get_customer_products_by_destination
+server.tool(
+    "get_customer_products_by_destination",
+    `Fetch and search for products available for a specific customer at a specific delivery destination.
+    
+    This tool retrieves the product catalog filtered by both customer and destination, ensuring only products
+    available for the selected delivery location are returned. It uses the same intelligent fuzzy search as the
+    standard product search, with fallback strategies for partial matches and typos.
+    Results are ranked by relevance score, with exact matches prioritized.
+    
+    Use this tool when you need to:
+    - Search for products specific to a customer and destination combination
+    - Ensure product availability at the selected delivery location
+    - Handle orders going to different customer destinations with location-specific availability
+    - Respect destination-based inventory or product restrictions
+    
+    Parameters:
+    @param {number} customerCode - The unique code/ID of the customer to fetch products for.
+    @param {number} destinationId - The unique ID of the delivery destination to filter products by. Must be a valid destination for the customer.
+    @param {string|string[]} productName - The name(s) of the product(s) to search for. Can be a single string or an array of strings. If empty, returns full catalog for destination.
+    
+    Returns: List of matching products available at the specified destination with relevance scores, descriptions, and pricing information.
+    `,
+    {
+        customerCode: z.coerce.number().describe("Customer code"),
+        destinationId: z.coerce.number().describe("Destination ID to filter products"),
         productName: z.union([z.array(z.string())]).describe("Product name(s) to search"),
     },
     async ({ customerCode, destinationId, productName }) => {
         try {
-            const result = await handleGetProducts(customerCode, destinationId, productName);
+            const result = await handleGetProducts(customerCode, productName, destinationId);
             return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
         } catch (error) {
             return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
@@ -294,7 +358,15 @@ server.tool(
 // Tool: place_order_request
 server.tool(
     "place_order_request",
-    "Place the order for the customer.",
+    `Place the order for the customer.
+    Parameters:
+    @param {number} customerCode - The code of the customer placing the order.
+    @param {number} destinationId - The ID of the destination for the order.
+    @param {object[]} items - The list of items in the order.
+        @param {string} itemCode - The code of the item.
+        @param {string} itemDescription - The description of the item.
+        @param {string} um - The unit of measure for the item.
+        @param {number} qty - The quantity of the item ordered.`,
     {
         customerCode: z.number().describe("Customer code"),
         destinationId: z.number().describe("Destination ID"),
@@ -353,11 +425,19 @@ app.get("/destinations", async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /products?customerCode=419&destinationId=1&productName=A&productName=B
+// GET /products?customerCode=419&productName=A&productName=B
 app.get("/products", async (req, res) => {
     try {
         // req.query.productName will be an array if multiple are passed, or a string if one is passed.
-        res.json(await handleGetProducts(req.query.customerCode, req.query.destinationId, req.query.productName));
+        res.json(await handleGetProducts(req.query.customerCode, req.query.productName));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /products-by-destination?customerCode=419&destinationId=1&productName=A&productName=B
+app.get("/products-by-destination", async (req, res) => {
+    try {
+        // req.query.productName will be an array if multiple are passed, or a string if one is passed.
+        res.json(await handleGetProducts(req.query.customerCode, req.query.productName, req.query.destinationId));
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
