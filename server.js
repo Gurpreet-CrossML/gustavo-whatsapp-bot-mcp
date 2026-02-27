@@ -286,22 +286,10 @@ server.tool(
 // Tool: get_customer_products
 server.tool(
     "get_customer_products",
-    `Fetch and search for products available for a specific customer.
-    
-    This tool retrieves the complete product catalog for a customer and optionally filters by product name(s).
-    It uses intelligent fuzzy search with fallback strategies to find matching products even with partial names or typos.
-    Results are ranked by relevance score, with exact matches prioritized.
-    
-    Use this tool when you need to:
-    - Browse all available products for a customer
-    - Search for products by name without destination filtering
-    - Get product details including descriptions, aliases, and pricing
-    
+    `Fetch list of products available for a customer (supports single name or array of names).
     Parameters:
-    @param {number} customerCode - The unique code/ID of the customer to fetch products for.
-    @param {string|string[]} productName - The name(s) of the product(s) to search for. Can be a single string or an array of strings. If empty, returns full catalog.
-    
-    Returns: List of matching products with relevance scores, descriptions, and pricing information.
+    @param {number} customerCode - The code of the customer to fetch products for.
+    @param {string|string[]} productName - The name(s) of the product(s) to search for. Can be a single string or an array of strings.
     `,
     {
         customerCode: z.coerce.number().describe("Customer code"),
@@ -320,25 +308,11 @@ server.tool(
 // Tool: get_customer_products_by_destination
 server.tool(
     "get_customer_products_by_destination",
-    `Fetch and search for products available for a specific customer at a specific delivery destination.
-    
-    This tool retrieves the product catalog filtered by both customer and destination, ensuring only products
-    available for the selected delivery location are returned. It uses the same intelligent fuzzy search as the
-    standard product search, with fallback strategies for partial matches and typos.
-    Results are ranked by relevance score, with exact matches prioritized.
-    
-    Use this tool when you need to:
-    - Search for products specific to a customer and destination combination
-    - Ensure product availability at the selected delivery location
-    - Handle orders going to different customer destinations with location-specific availability
-    - Respect destination-based inventory or product restrictions
-    
+    `Fetch list of products available for a customer filtered by destination (supports single name or array of names).
     Parameters:
-    @param {number} customerCode - The unique code/ID of the customer to fetch products for.
-    @param {number} destinationId - The unique ID of the delivery destination to filter products by. Must be a valid destination for the customer.
-    @param {string|string[]} productName - The name(s) of the product(s) to search for. Can be a single string or an array of strings. If empty, returns full catalog for destination.
-    
-    Returns: List of matching products available at the specified destination with relevance scores, descriptions, and pricing information.
+    @param {number} customerCode - The code of the customer to fetch products for.
+    @param {number} destinationId - The ID of the destination to filter products by.
+    @param {string|string[]} productName - The name(s) of the product(s) to search for. Can be a single string or an array of strings.
     `,
     {
         customerCode: z.coerce.number().describe("Customer code"),
