@@ -277,8 +277,6 @@ server.tool(
         "ChooseDestination": "0 = customer has only one destination (or default set), 1 = customer has multiple destinations (ask user to choose)"
     }
     ]
-    
-    Note: If ChooseDestination is 1, you should call get_customer_destinations to show the user all available options.
     `,
     { name: z.string().describe("Customer name exactly as written") },
     async ({ name }) => {
@@ -319,8 +317,6 @@ server.tool(
         "IsDefault": "true if this is the customer's default destination, false otherwise"
     }
     ]
-    
-    Note: Pass the DestinationId from the selected destination to other tools like get_customer_products_by_destination or place_order_request.
     `,
     { code: z.union( z.number()).transform((val) => Number(val)).describe("Customer code") },
     async ({ code }) => {
@@ -409,19 +405,31 @@ server.tool(
     Returns a list of matching products available at the specified destination with the following structure:
     [
      {
-        "Code": "numeric code identifying the product",
-        "Description": "detailed product description",
-        "Priority": "numeric priority level",
-        "Alias": ["array", "of", "alternative names"],
-        "score": "relevance score as percentage (0-100)",
-        "scoreFormatted": "formatted score string (e.g., '95.3%')"
+        "Code": "numeric code",
+        "Description": "string",
+        "Priority": "numeric code",
+        "Alias": [
+            "string",
+            "string",
+        ]
      }
     ]
-    
-    When multiple products match a search term, all matches are returned ranked by relevance. 
-    If no matches are found for the destination, an empty list is returned for that term.
     `,
     {
+        customerCode: z.coerce.number().describe("Customer code"),
+        destinationId: z.coerce.number().describe("Destination ID to filter products"),
+        productName: z.union([z.array(z.string())]).describe("Product name(s) to search"),
+    },
+    async ({ customerCode, destinationId, productName }) => {
+        try {
+            const result = await handleGetProducts(customerCode, productName, destinationId);
+            return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        } catch (error) {
+            return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+    }
+);
+
 // Tool: place_order_request
 server.tool(
     "place_order_request",
@@ -456,20 +464,6 @@ server.tool(
     
     Important: Always confirm all order details (customer, destination, items, quantities) with the customer before calling this tool.
     Once submitted, the order cannot be modified through this tool - contact support for changes.
-    `,ram {number} customerCode - The code of the customer placing the order.
-    @param {number} destinationId - The ID of the destination for the order.
-    @param {object[]} items - The list of items in the order.
-        @param {string} itemCode - The code of the item.
-        @param {string} itemDescription - The description of the item.
-        @param {string} um - The unit of measure for the item.
-        @param {number} qty - The quantity of the item ordered.
-        
-    Return 
-    The tool will return a status indicating whether the order was placed successfully or if it failed, along with any relevant details. This tool is used to finalize the order after all necessary information has been gathered and confirmed.
-    {
-        "status": "order_placed" | "order_failed",
-        "details": { ... } // Additional details in case of failure
-    }
      `,
     {
         customerCode: z.number().describe("Customer code"),
