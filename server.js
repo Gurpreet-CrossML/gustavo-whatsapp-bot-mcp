@@ -86,13 +86,16 @@ async function handleGetDestinations(code) {
 
 async function handleGetProducts(customerCode, destinationId, productNames) {
     if (!customerCode) throw new Error("Customer code is required");
-    if (!destinationId) throw new Error("Destination ID is required");
 
     // Normalize productNames to an array
     const namesArray = Array.isArray(productNames) ? productNames : [productNames].filter(Boolean);
 
-    // WaBot_listProd.asp?customerCode=...&destinationId=...
-    const products = await callApi("WaBot_listProd.asp", "GET", null, { customerCode, destinationId });
+    // Build params — destinationId is optional
+    const params = { customerCode };
+    if (destinationId) params.destinationId = destinationId;
+
+    // WaBot_listProd.asp?customerCode=...&destinationId=... (optional)
+    const products = await callApi("WaBot_listProd.asp", "GET", null, params);
 
     if (namesArray.length === 0) {
         return {
@@ -278,8 +281,8 @@ server.tool(
     "Fetch list of products available for a customer (supports single name or array of names).",
     {
         customerCode: z.coerce.number().describe("Customer code"),
-        destinationId: z.coerce.number().describe("Destination ID"),
-        productName: z.union([z.array(z.string())]).describe("Product name(s) to search"),
+        destinationId: z.coerce.number().optional().describe("Destination ID (optional)"),
+        productName: z.union([z.string(), z.array(z.string())]).describe("Product name(s) to search"),
     },
     async ({ customerCode, destinationId, productName }) => {
         try {
