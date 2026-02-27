@@ -266,17 +266,19 @@ server.tool(
     Parameters:
     @param {string} name - The customer's name exactly as registered in the system. The search performs exact matching.
     
-    Returns customer information with the following structure:
-    [
-    {
-        "Code": "unique customer identifier/code",
-        "Name": "registered customer name",
-        "DestinationId": "numeric code of the default destination",
-        "DestinationName": "name of the default delivery destination",
-        "DestinationAddress": "full address of the default destination",
-        "ChooseDestination": "0 = customer has only one destination (or default set), 1 = customer has multiple destinations (ask user to choose)"
-    }
-    ]
+    Returns:
+    Array<Customer>
+
+    Customer object structure:
+
+    - Code (number): Unique customer identifier.
+    - Name (string): Customer registered name.
+    - DestinationId (number): Default delivery destination ID.
+    - DestinationName (string): Default delivery destination name.
+    - DestinationAddress (string): Full delivery address.
+    - ChooseDestination (number):
+        - 0 → Customer has only one destination. Proceed directly.
+        - 1 → Customer has multiple destinations. You MUST ask the user to select destination before fetching products.
     `,
     { name: z.string().describe("Customer name exactly as written") },
     async ({ name }) => {
@@ -308,15 +310,18 @@ server.tool(
     Parameters:
     @param {number} code - The customer's unique code (obtained from get_customer_details).
     
-    Returns an array of all destination objects with the following structure:
-    [
-    {
-        "DestinationId": "unique identifier for this destination",
-        "DestinationName": "name/label of the destination (e.g., 'Main Office', 'Warehouse')",
-        "DestinationAddress": "complete delivery address for this location",
-        "IsDefault": "true if this is the customer's default destination, false otherwise"
-    }
-    ]
+    Returns:
+    Array<Destination>
+
+    Destination object structure:
+
+    - DestinationId (number): Unique identifier for the destination.
+    - DestinationName (string): Name or label of the destination (for example: "Main Office", "Warehouse Milano").
+    - DestinationAddress (string): Full delivery address of this destination.
+    - DefaultDestination (boolean): Indicates whether this is the default destination.
+        - true → This is the default destination.
+        - false → This is not the default destination.
+
     `,
     { code: z.union( z.number()).transform((val) => Number(val)).describe("Customer code") },
     async ({ code }) => {
@@ -350,17 +355,16 @@ server.tool(
                                           or an array of strings. If empty or not provided, returns full catalog.
     
     Returns a list of matching products with the following structure for each search term:
-    [
-     {
-        "Code": "numeric code identifying the product",
-        "Description": "detailed product description",
-        "Priority": "numeric priority level",
-        "Alias": ["array", "of", "alternative names"],
-        "score": "relevance score as percentage (0-100)",
-        "scoreFormatted": "formatted score string (e.g., '95.3%')"
-     }
-    ]
-    
+    Array<Product>
+
+    Product object structure:
+    - Code (number): Unique identifier for the product.
+    - Description (string): Detailed description of the product.
+    - Priority (number): Priority level of the product (higher numbers indicate higher priority).
+    - Alias (array of strings): Alternative names or aliases for the product.
+    - score (number): Relevance score as a percentage (0-100).
+    - scoreFormatted (string): Formatted score string (e.g., '95.3%').
+     
     When multiple products match a search term, all matches are returned ranked by relevance. 
     If no matches are found, an empty list is returned.
     `,
@@ -403,17 +407,19 @@ server.tool(
                                           or an array of strings. If empty or not provided, returns full catalog for destination.
     
     Returns a list of matching products available at the specified destination with the following structure:
-    [
-     {
-        "Code": "numeric code",
-        "Description": "string",
-        "Priority": "numeric code",
-        "Alias": [
-            "string",
-            "string",
-        ]
-     }
-    ]
+    
+    Array<Product>
+    
+    Product object structure:
+    - Code (number): Unique identifier for the product.
+    - Description (string): Detailed description of the product.
+    - Priority (number): Priority level of the product (higher numbers indicate higher priority).
+    - Alias (array of strings): Alternative names or aliases for the product.
+    - score (number): Relevance score as a percentage (0-100).
+    - scoreFormatted (string): Formatted score string (e.g., '95.3%').
+    
+    When multiple products match a search term, all matches are returned ranked by relevance. 
+    If no matches are found, an empty list is returned.
     `,
     {
         customerCode: z.coerce.number().describe("Customer code"),
@@ -457,10 +463,9 @@ server.tool(
         @param {number} qty - The quantity to order for this item (must be a positive number)
     
     Returns the order submission status with the following structure:
-    {
-        "status": "order_placed (success) | order_failed (failure)",
-        "details": "Additional information including order ID on success, error details on failure"
-    }
+    
+    - status (string): "order_placed" if the order was successfully submitted, "order_failed" if there was an error.
+    - details (object, optional): Additional information about the order submission result, especially in case of failure.  
     
     Important: Always confirm all order details (customer, destination, items, quantities) with the customer before calling this tool.
     Once submitted, the order cannot be modified through this tool - contact support for changes.
