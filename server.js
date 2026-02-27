@@ -323,7 +323,7 @@ server.tool(
         - false → This is not the default destination.
 
     `,
-    { code: z.union( z.number()).transform((val) => Number(val)).describe("Customer code") },
+    { code: z.union([z.number(), z.string()]).transform((val) => Number(val)).describe("Customer code") },
     async ({ code }) => {
         try {
             const result = await handleGetDestinations(code);
@@ -370,7 +370,7 @@ server.tool(
     `,
     {
         customerCode: z.coerce.number().describe("Customer code"),
-        productName: z.union([z.array(z.string())]).describe("Product name(s) to search"),
+        productName: z.union([z.string(), z.array(z.string())]).describe("Product name(s) to search"),
     },
     async ({ customerCode, productName }) => {
         try {
@@ -424,7 +424,7 @@ server.tool(
     {
         customerCode: z.coerce.number().describe("Customer code"),
         destinationId: z.coerce.number().describe("Destination ID to filter products"),
-        productName: z.union([z.array(z.string())]).describe("Product name(s) to search"),
+        productName: z.union([z.string(), z.array(z.string())]).describe("Product name(s) to search"),
     },
     async ({ customerCode, destinationId, productName }) => {
         try {
