@@ -27,51 +27,46 @@ const jsonSchema = zodTextFormat(MatchsResponseSchema, "event");
 const BASE_SYSTEM_PROMPT = `
 You are a product matching assistant. Match the user's inquiry to items in the provided product catalog only.
 
-**Matching Steps:**
-1. For each query, first compare ONLY against product descriptions for semantic similarity.
-2. If a match with score >= 95 is found in the description alone, return it immediately — do NOT check aliases at all.
-3. If no description match reaches 95, then also check aliases and combine the best results.
-4. Assign a similarity score (0–100):
-   - 100: Exact match (all key terms present in description or alias).
-   - 70-99: High similarity (most key terms match).
-   - 50-69: Partial match (some key terms match).
-   - Below 50: Poor match.
-5. Return logic:
-   - If best match score >= 95: Return only those high-scoring matches.
-   - If best match score < 95: Return all matches AND add one additional entry at the end.
+**Matching Strategy (PHASED FALLBACK):**
+1. **PHASE 1 (Search Description ONLY):**
+   - Look for the user's search query ONLY within the product "Description" field.
+   - If any products match even partially (Score > 0), return ONLY these results and **STOP**. Do not look at aliases.
+2. **PHASE 2 (Search Alias ONLY):**
+   - **ONLY** if Phase 1 found zero matches, then look for the search query within the "Alias" arrays.
+   - If products are found via alias, return them. Perfect alias hits get a score of **100**.
 
-**For the additional entry when score < 95:**
-- Set "code" to: FastOrder_Generico
-- Set "description" to: THE EXACT TEXT THE USER SEARCHED FOR (copy it verbatim)
-- Set "alias" to: empty array []
-- Set "score" to: 0
+**Scoring Rules:**
+- **High Score (100)**: If the search query perfectly matches the active field (Description in P1, Alias in P2), the score MUST be 100.
+- **Conditional Generic Entry**:
+  - If the highest match score is **>= 95**: DO NOT include a "FastOrder_Generico" entry.
+  - If the highest match score is **< 95**: Append one "FastOrder_Generico" entry at the very end.
 
-**Output Format (JSON only, no markdown, no extra text):**
-[
-  {
-    "code": "catalog_code",
-    "description": "catalog_description",
-    "alias": ["alias1", "alias2"],
-    "score": 85
-  }
-]
+**FastOrder_Generico entry (Conditional):**
+- **Set "code" to:** FastOrder_Generico
+- **Set "description" to:** THE EXACT TEXT THE USER SEARCHED FOR (copy it verbatim)
+- **Set "alias" to:** empty array []
+- **Set "score" to:** 0
 
-**CRITICAL EXAMPLES:**
+**CRITICAL EXAMPLE (Fruit Scenario):**
+Search query: "apple"
+Catalog has:
+- Product 1: Description: "FRESH APPLE", Alias: []
+- Product 2: Description: "FRUIT BASKET", Alias: ["RED APPLE", "GREEN APPLE"]
 
-If user searches for "alfajores Nero clásico" and best match is 70:
-[
-  {"code": "006478", "description": "ALFAJORES MERENGUE CLASICO HAVANNA (1 x 12)", "alias": [], "score": 70},
-  {"code": "006477", "description": "ALFAJORES MERENGUE CLASICO HAVANNA (1 x 6)", "alias": [], "score": 70},
-  {"code": "FastOrder_Generico", "description": "alfajores Nero clásico", "alias": [], "score": 0}
-]
+**Logic:**
+Phase 1 finds Product 1 contains "apple" in its description. 
+**RESULT**: Return Product 1 (Score: 100) and NO generic entry. Product 2 is **EXCLUDED** because Phase 1 found a match.
 
-If user searches for "bon o bon nero" and best match is 70:
-[
-  {"code": "001817", "description": "BOMBON BON O BON LECHE", "alias": [], "score": 70},
-  {"code": "FastOrder_Generico", "description": "bon o bon nero", "alias": [], "score": 0}
-]
+Search query: "kumquat" (not in any description, but is an alias of "CITRUS MIX")
+1. Phase 1 finds zero description hits for "kumquat".
+2. Phase 2 searches aliases and finds "kumquat" in "CITRUS MIX" alias.
+**RESULT**: Return "CITRUS MIX" (Score: 100).
 
-The description field in the FastOrder_Generico entry must NEVER be "FastOrder_Generico" - it must be the user's search text.
+**MANDATORY RULES:**
+1. **STRICT VERBATIM**: The "description" field in the output MUST be an exact, character-for-character copy of the catalog Description. Never add aliases or summary text to it.
+2. **NO MODIFICATION**: If physical catalog description is "REALE USA", output MUST be "REALE USA". Never output "REALE USA ANGUS".
+3. **PHASE INDEPENDENCE**: Phase 1 results ALWAY hide Phase 2 results.
+4. **JSON ONLY**: No markdown, no conversational text.
 `;
 
 async function getMatchingProducts(products, userProducts) {
@@ -79,16 +74,16 @@ async function getMatchingProducts(products, userProducts) {
     .map(
       (p) =>
         `- {
-            Description: ${p.Description},
-            Code: ${p.Code},
-            Alias: ${p.Alias ? `[${p.Alias.map((a) => `"${a}"`).join(", ")}]` : "[]"}
+  Description: ${p.Description},
+Code: ${p.Code},
+Alias: ${p.Alias ? `[${p.Alias.map((a) => `"${a}"`).join(", ")}]` : "[]"}
           }`,
     )
     .join("\n");
   const systemPrompt = `${BASE_SYSTEM_PROMPT}
     
-  **Product Catalog (match against these items only):**
-    ${products_string}`;
+  ** Product Catalog(match against these items only):**
+  ${products_string} `;
 
   const results = userProducts.map(async (product) => {
     const response = await openai.responses.create({
