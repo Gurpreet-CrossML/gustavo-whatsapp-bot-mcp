@@ -248,7 +248,36 @@ async function handlePlaceOrder(orderData) {
 // Tool: get_customer_details
 server.tool(
     "get_customer_details",
-    "Verify customer identity and fetch details including default destination.",
+    `Verify customer identity and retrieve essential customer information including default destination.
+    
+        This tool performs customer lookup by name to confirm identity and retrieve core customer data. It returns the customer's 
+        unique code, registered name, default delivery destination, and a flag indicating whether the customer has multiple destinations. 
+        This is typically the first step in any order placement workflow.
+        
+        Use this tool when you need to:
+        - Verify and confirm a customer's identity by name
+        - Retrieve a customer's unique code for subsequent API calls
+        - Get the customer's default delivery destination
+        - Determine if you need to prompt the user to select among multiple destinations
+        - Initiate a new order process for a customer
+        
+        Parameters:
+        @param {string} name - The customer's name exactly as registered in the system. The search performs exact matching.
+        
+        Returns:
+        Array<Customer>
+
+        Customer object structure:
+
+        - Code (number): Unique customer identifier.
+        - Name (string): Customer registered name.
+        - DestinationId (number): Default delivery destination ID.
+        - DestinationName (string): Default delivery destination name.
+        - DestinationAddress (string): Full delivery address.
+        - ChooseDestination (number):
+            - 0 → Customer has only one destination. Proceed directly.
+            - 1 → Customer has multiple destinations. You MUST ask the user to select destination before fetching products.
+    `,
     { name: z.string().describe("Customer name exactly as written") },
     async ({ name }) => {
         try {
@@ -263,7 +292,35 @@ server.tool(
 // Tool: get_customer_destinations
 server.tool(
     "get_customer_destinations",
-    "Fetch all destinations for a customer.",
+    `Retrieve all delivery destinations associated with a customer account.
+        
+        This tool fetches the complete list of delivery locations where a customer can receive orders. Each destination 
+        includes its unique identifier, name, full address, and a flag indicating if it's the default delivery location. 
+        Use this tool when a customer has multiple delivery locations and needs to specify where their order should be sent.
+        
+        Use this tool when you need to:
+        - Display all available delivery locations for a customer
+        - Allow the customer to select a specific delivery destination
+        - Verify destination information before placing an order
+        - Check which destination is marked as the customer's default
+        - Ensure the order goes to the correct delivery address
+        
+        Parameters:
+        @param {number} code - The customer's unique code (obtained from get_customer_details).
+        
+        Returns:
+        Array<Destination>
+
+        Destination object structure:
+
+        - DestinationId (number): Unique identifier for the destination.
+        - DestinationName (string): Name or label of the destination (for example: "Main Office", "Warehouse Milano").
+        - DestinationAddress (string): Full delivery address of this destination.
+        - DefaultDestination (boolean): Indicates whether this is the default destination.
+            - true → This is the default destination.
+            - false → This is not the default destination.
+
+    `,
     { code: z.union([z.string(), z.number()]).transform((val) => Number(val)).describe("Customer code") },
     async ({ code }) => {
         try {
@@ -278,7 +335,44 @@ server.tool(
 // Tool: get_customer_products
 server.tool(
     "get_customer_products",
-    "Fetch list of products available for a customer (supports single name or array of names).",
+    `Fetch and search for products available for a specific customer (optionally filtered by delivery destination).
+        This tool retrieves the product catalog for a specific customer and performs intelligent fuzzy matching against product names. It can also optionally filter products by a specific delivery destination, ensuring that only products available for that selected location are returned.
+        The tool uses multi-stage fallback strategies to find matching products even with partial names, spelling variations, or typos. Results are ranked by relevance score, with exact matches prioritized.
+    
+    Use this tool when you need to:
+        - Search for products available for a specific customer
+        - Search for products available for a specific customer and delivery destination
+        - Ensure product availability at a selected delivery location
+        - If a product is not available at a specific destination, it is excluded from results
+        - Browse the full product catalog for a customer (with or without destination filtering)
+        - Handle orders going to different customer destinations with location-specific availability
+        - Respect destination-based inventory or product restrictions
+        - Perform batch searches for multiple product names
+    
+    Parameters:
+    @param {number} customerCode - The unique code/ID of the customer to fetch products for.
+    @param {number} [destinationId] - (Optional) The ID of the delivery destination to filter products by. If not provided, products from all destinations for the customer are returned.
+    @param {string|string[]} productName - The name(s) of the product(s) to search for. Can be a single string 
+                                          or an array of strings. If empty or not provided, returns full catalog.
+    
+    Returns a list of matching products with the following structure for each search term:
+    Array<Product>
+
+    Product object structure:
+    - Code (number): Unique identifier for the product.
+    - Description (string): Detailed description of the product.
+    - Priority (number): Priority level of the product (higher numbers indicate higher priority).
+    - Alias (array of strings): Alternative names or aliases for the product.
+    - score (number): Relevance score as a percentage (0-100).
+    - scoreFormatted (string): Formatted score string (e.g., '95.3%').
+
+    **Note:**
+    - When multiple product found it add a FastOrder_Generico entry with the user's search text.
+    - That was use when user select the None of above option.
+     
+    When multiple products match a search term, all matches are returned ranked by relevance.
+    If no matches are found, an empty list is returned.
+    `,
     {
         customerCode: z.coerce.number().describe("Customer code"),
         destinationId: z.coerce.number().optional().describe("Destination ID (optional)"),
@@ -297,7 +391,37 @@ server.tool(
 // Tool: place_order_request
 server.tool(
     "place_order_request",
-    "Place the order for the customer.",
+    `Submit and finalize a customer order for processing.
+        
+        This tool submits the complete order details to the backend system for processing. It requires confirmation of the customer, 
+        their selected delivery destination, and itemized list of products with quantities. The system validates all information 
+        and returns a status indicating success or failure. This is the final step in the order workflow and should only be called 
+        after all order details have been confirmed with the customer.
+        
+        Use this tool when you need to:
+        - Finalize and submit an order after customer confirmation
+        - Process an order with specific items and quantities
+        - Send orders to a specific delivery destination
+        - Complete the entire order workflow
+        - Get confirmation that an order has been successfully placed
+        
+        Parameters:
+        @param {number} customerCode - The unique customer code (obtained from get_customer_details).
+        @param {number} destinationId - The ID of the selected delivery destination (obtained from get_customer_destinations).
+        @param {object[]} items - An array of ordered items, each containing:
+            @param {string} itemCode - The product's unique code identifier
+            @param {string} itemDescription - The product's description/name for reference
+            @param {string} um - Unit of measure for the product (e.g., 'kg', 'units', 'boxes')
+            @param {number} qty - The quantity to order for this item (must be a positive number)
+        
+        Returns the order submission status with the following structure:
+        
+        - status (string): "order_placed" if the order was successfully submitted, "order_failed" if there was an error.
+        - details (object, optional): Additional information about the order submission result, especially in case of failure.  
+        
+        Important: Always confirm all order details (customer, destination, items, quantities) with the customer before calling this tool.
+        Once submitted, the order cannot be modified through this tool - contact support for changes.
+     `,
     {
         customerCode: z.number().describe("Customer code"),
         destinationId: z.number().describe("Destination ID"),
