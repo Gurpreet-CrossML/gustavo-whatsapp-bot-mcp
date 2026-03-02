@@ -364,14 +364,10 @@ server.tool(
     - Priority (number): Priority level of the product (higher numbers indicate higher priority).
     - Alias (array of strings): Alternative names or aliases for the product.
     - score (number): Relevance score as a percentage (0-100).
-    - scoreFormatted (string): Formatted score string (e.g., '95.3%').
+    - scoreFormatted (string): Formatted score percentage.
 
-    **Note:**
-    - When multiple product found it add a FastOrder_Generico entry with the user's search text.
-    - That was use when user select the None of above option.
-     
-    When multiple products match a search term, all matches are returned ranked by relevance.
-    If no matches are found, an empty list is returned.
+    When multiple matches are found, a "FastOrder_Generico" entry is included with the user's search text to allow for custom selection.
+    If no matches are found, an empty data set is returned.
     `,
     {
         customerCode: z.coerce.number().describe("Customer code"),
