@@ -62,8 +62,59 @@ async function callApi(endpoint, method = "GET", data = null, params = {}) {
 async function handleGetCustomers(name) {
     if (!name) throw new Error("Customer name is required");
     const cleanName = name.trim();
-    // WaBot_listCust.asp?name=...
-    return await callApi("WaBot_listCust.asp", "GET", null, { name: cleanName });
+    const raw = await callApi("WaBot_listCust.asp", "GET", null, { name: cleanName });
+
+    // Normalize to array
+    const customers = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+
+    if (customers.length === 0) {
+        return { status: "not_found", message: `No customer found with name '${cleanName}'` };
+    }
+
+    if (customers.length > 1) {
+        return {
+            status: "multiple_customers",
+            customers: customers.map(c => ({
+                code: c.Code,
+                name: c.Name,
+                destinationId: c.DestinationId || null,
+                destinationName: c.DestinationName || null,
+                destinationAddress: c.DestinationAddress || null,
+                hasDestination: !!c.DestinationId,
+                chooseDestination: c.ChooseDestination === 1
+            }))
+        };
+    }
+
+    // Single customer
+    const c = customers[0];
+
+    if (c.ChooseDestination === 1) {
+        return {
+            status: "success_choose_destination",
+            customerCode: c.Code,
+            customerName: c.Name,
+            message: "Customer verified. You need to select a destination first before proceeding."
+        };
+    }
+
+    if (!c.DestinationId) {
+        return {
+            status: "success_no_destination",
+            customerCode: c.Code,
+            customerName: c.Name,
+            message: "Customer verified but no destination available."
+        };
+    }
+
+    return {
+        status: "success",
+        customerCode: c.Code,
+        customerName: c.Name,
+        destinationId: c.DestinationId,
+        destinationName: c.DestinationName,
+        destinationAddress: c.DestinationAddress
+    };
 }
 
 async function handleGetDestinations(code) {
@@ -276,8 +327,7 @@ server.tool(
         - DestinationAddress (string): Full delivery address.
         - ChooseDestination (number):
             - 0 → Customer has only one destination. Proceed directly.
-            - 1 → Customer has multiple destinations. You MUST ask the user to select destination before fetching products.
-    `,
+            - 1 → Customer has multiple destinations. You MUST ask the user to select destination before fetching products.`,
     { name: z.string().describe("Customer name exactly as written") },
     async ({ name }) => {
         try {
