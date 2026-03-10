@@ -416,8 +416,10 @@ server.tool(
     - score (number): Relevance score as a percentage (0-100).
     - scoreFormatted (string): Formatted score percentage.
 
-    When multiple matches are found, a "FastOrder_Generico" entry is included with the user's search text to allow for custom selection.
-    If no matches are found, an empty data set is returned.
+    When multiple matches are found (2+), a trailing \"FastOrder_Generico\" entry is always appended so the user can choose \"none of the above\".
+    When a single match is found with score >= 95, no generic entry is added.
+    When a single match is found with score < 95, a \"FastOrder_Generico\" entry is appended.
+    When NO matches are found in any phase, a single \"NOT_FOUND\" entry (Code: \"NOT_FOUND\", Score: 0) is returned — prompt the user to correct the name or confirm they want a generic article.
     `,
     {
         customerCode: z.coerce.number().describe("Customer code"),
