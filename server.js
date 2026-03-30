@@ -288,7 +288,7 @@ async function handlePlaceOrder(orderData) {
     const response = await callApi("WaBot_createOrd.asp", "POST", orderData);
 
     if (response && response.result === true) {
-        return { status: "order_placed" };
+        return { status: "order_placed", details: response };
     } else {
         return { status: "order_failed", details: response };
     }
@@ -454,11 +454,13 @@ server.tool(
         Parameters:
         @param {number} customerCode - The unique customer code (obtained from get_customer_details).
         @param {number} destinationId - The ID of the selected delivery destination (obtained from get_customer_destinations).
+        @param {string} [deliveryNotes] - Optional delivery notes or instructions provided by the customer.
         @param {object[]} items - An array of ordered items, each containing:
             @param {string} itemCode - The product's unique code identifier
             @param {string} itemDescription - The product's description/name for reference
             @param {string} um - Unit of measure for the product (e.g., 'kg', 'units', 'boxes')
             @param {number} qty - The quantity to order for this item (must be a positive number)
+            @param {string} [itemNotes] - Optional special instructions or notes specific to this individual item (e.g., "fine chopped").
         
         Returns the order submission status with the following structure:
         
@@ -471,11 +473,13 @@ server.tool(
     {
         customerCode: z.number().describe("Customer code"),
         destinationId: z.number().describe("Destination ID"),
+        deliveryNotes: z.string().describe("Delivery notes"),
         items: z.array(z.object({
             itemCode: z.string().describe("Code"),
             itemDescription: z.string().describe("Description"),
             um: z.string().describe("Unit"),
             qty: z.number().describe("Qty"),
+            itemNotes: z.string().describe("Item notes"),
         })).describe("Items"),
     },
     async (orderData) => {
