@@ -117,6 +117,27 @@ async function handleGetCustomers(name) {
     };
 }
 
+async function handleGetUsers(name) {
+    if (!name) throw new Error("Search name is required");
+    // WaBot_listUsers.asp?name=...
+    const raw = await callApi("WaBot_listUsers.asp", "GET", null, { name: name.trim() });
+
+    // Normalize to array
+    const users = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+
+    if (users.length === 0) {
+        return { status: "not_found", message: `No users found matching '${name}'` };
+    }
+
+    return {
+        status: "success",
+        users: users.map(u => ({
+            name: u.Name,
+            code: u.Code // Assuming it has a code
+        }))
+    };
+}
+
 async function handleGetDestinations(code) {
     if (!code) throw new Error("Customer code is required");
     // WaBot_listDest.asp?code=...
@@ -294,6 +315,18 @@ async function handlePlaceOrder(orderData) {
     }
 }
 
+async function handleCreateTask(taskData) {
+    // WaBot_createTask.asp (POST)
+    // Payload: { recipient: "", notes: "" }
+    const response = await callApi("WaBot_createTask.asp", "POST", taskData);
+
+    if (response && response.result === true) {
+        return { status: "task_created", details: response };
+    } else {
+        return { status: "task_failed", details: response };
+    }
+}
+
 // --- MCP Tool Definitions ---
 
 // Tool: get_customer_details
@@ -413,6 +446,7 @@ server.tool(
     - Description (string): Detailed description of the product.
     - Priority (number): Priority level of the product (higher numbers indicate higher priority).
     - Alias (array of strings): Alternative names or aliases for the product.
+    - SalePrice (number): The price per unit of the product.
     - score (number): Relevance score as a percentage (0-100).
     - scoreFormatted (string): Formatted score percentage.
 
@@ -491,6 +525,63 @@ server.tool(
         }
     }
 );
+// Tool: create_task
+server.tool(
+    "create_task",
+    `Create a new task for a specified recipient with internal notes.
+    
+    Use this tool when the user wants to assign a task or create a reminder for a specific person in the organization. 
+    Both recipient and notes are mandatory.
+    
+    Parameters:
+    @param {string} recipient - The internal name or code of the person who will receive the task (e.g., "GUSTAVO").
+    @param {string} notes - The detailed description or notes for the task.
+    
+    Returns:
+    - status (string): "task_created" if successful, "task_failed" otherwise.
+    - details (object): Contains the 'result' and 'idTask' if successful.
+    `,
+    {
+        recipient: z.string().describe("The person who will receive the task"),
+        notes: z.string().describe("The task description/notes"),
+    },
+    async (taskData) => {
+        try {
+            const result = await handleCreateTask(taskData);
+            return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        } catch (error) {
+            return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+    }
+);
+
+// Tool: get_users
+server.tool(
+    "get_users",
+    `Search for internal users or teams within the organization.
+    
+    Use this tool when you need to find or verify the name of a person who should be assigned to a task. 
+    The tool performs a search (like logic) based on the provided name.
+    
+    Parameters:
+    @param {string} name - The name or partial name of the user to search for.
+    
+    Returns:
+    - status: "success" or "not_found"
+    - users: List of matching users, each with:
+      - code (string): The user's unique code (e.g., "GUSTAVO") — use this as the 'recipient' in create_task.
+      - name (string): The user's full name (e.g., "GUSTAVO MINACCI") — use this for display only.
+    `,
+    { name: z.string().describe("The name to search for (partial match)") },
+    async ({ name }) => {
+        try {
+            const result = await handleGetUsers(name);
+            return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        } catch (error) {
+            return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+    }
+);
 
 // --- Express Server ---
 
@@ -530,6 +621,13 @@ app.get("/destinations", async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /users?name=gustavo
+app.get("/users", async (req, res) => {
+    try {
+        res.json(await handleGetUsers(req.query.name));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /products?customerCode=419&destinationId=1&productName=A&productName=B
 app.get("/products", async (req, res) => {
     try {
@@ -542,6 +640,13 @@ app.get("/products", async (req, res) => {
 app.post("/order", async (req, res) => {
     try {
         res.json(await handlePlaceOrder(req.body));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /task
+app.post("/task", async (req, res) => {
+    try {
+        res.json(await handleCreateTask(req.body));
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
