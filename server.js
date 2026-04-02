@@ -446,7 +446,6 @@ server.tool(
     - Description (string): Detailed description of the product.
     - Priority (number): Priority level of the product (higher numbers indicate higher priority).
     - Alias (array of strings): Alternative names or aliases for the product.
-    - SalePrice (number): The price per unit of the product.
     - score (number): Relevance score as a percentage (0-100).
     - scoreFormatted (string): Formatted score percentage.
 
@@ -489,6 +488,7 @@ server.tool(
         @param {number} customerCode - The unique customer code (obtained from get_customer_details).
         @param {number} destinationId - The ID of the selected delivery destination (obtained from get_customer_destinations).
         @param {string} [deliveryNotes] - Optional delivery notes or instructions provided by the customer.
+        @param {string} senderMobile - Mobile number of the sender.
         @param {object[]} items - An array of ordered items, each containing:
             @param {string} itemCode - The product's unique code identifier
             @param {string} itemDescription - The product's description/name for reference
@@ -508,6 +508,7 @@ server.tool(
         customerCode: z.number().describe("Customer code"),
         destinationId: z.number().describe("Destination ID"),
         deliveryNotes: z.string().describe("Delivery notes"),
+        senderMobile: z.string().describe("Sender mobile number"),
         items: z.array(z.object({
             itemCode: z.string().describe("Code"),
             itemDescription: z.string().describe("Description"),
