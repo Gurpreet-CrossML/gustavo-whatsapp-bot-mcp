@@ -495,7 +495,8 @@ server.tool(
             @param {string} um - Unit of measure for the product (e.g., 'kg', 'units', 'boxes')
             @param {number} qty - The quantity to order for this item (must be a positive number)
             @param {string} [itemNotes] - Optional special instructions or notes specific to this individual item (e.g., "fine chopped").
-        
+            @param {number} [price] - Optional price per item (e.g., 10.99)
+            
         Returns the order submission status with the following structure:
         
         - status (string): "order_placed" if the order was successfully submitted, "order_failed" if there was an error.
@@ -514,6 +515,7 @@ server.tool(
             itemDescription: z.string().describe("Description"),
             um: z.string().describe("Unit"),
             qty: z.number().describe("Qty"),
+            price: z.number().optional().describe("Price per item (optional)"),
             itemNotes: z.string().describe("Item notes"),
         })).describe("Items"),
     },
