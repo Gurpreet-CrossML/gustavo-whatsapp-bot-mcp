@@ -62,8 +62,80 @@ async function callApi(endpoint, method = "GET", data = null, params = {}) {
 async function handleGetCustomers(name) {
     if (!name) throw new Error("Customer name is required");
     const cleanName = name.trim();
-    // WaBot_listCust.asp?name=...
-    return await callApi("WaBot_listCust.asp", "GET", null, { name: cleanName });
+    const raw = await callApi("WaBot_listCust.asp", "GET", null, { name: cleanName });
+
+    // Normalize to array
+    const customers = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+
+    if (customers.length === 0) {
+        return { status: "not_found", message: `No customer found with name '${cleanName}'` };
+    }
+
+    if (customers.length > 1) {
+        return {
+            status: "multiple_customers",
+            customers: customers.map(c => ({
+                code: c.Code,
+                name: c.Name,
+                destinationId: c.DestinationId || null,
+                destinationName: c.DestinationName || null,
+                destinationAddress: c.DestinationAddress || null,
+                hasDestination: !!c.DestinationId,
+                chooseDestination: c.ChooseDestination === 1
+            }))
+        };
+    }
+
+    // Single customer
+    const c = customers[0];
+
+    if (c.ChooseDestination === 1) {
+        return {
+            status: "success_choose_destination",
+            customerCode: c.Code,
+            customerName: c.Name,
+            message: "Customer verified. You need to select a destination first before proceeding."
+        };
+    }
+
+    if (!c.DestinationId) {
+        return {
+            status: "success_no_destination",
+            customerCode: c.Code,
+            customerName: c.Name,
+            message: "Customer verified but no destination available."
+        };
+    }
+
+    return {
+        status: "success",
+        customerCode: c.Code,
+        customerName: c.Name,
+        destinationId: c.DestinationId,
+        destinationName: c.DestinationName,
+        destinationAddress: c.DestinationAddress
+    };
+}
+
+async function handleGetUsers(name) {
+    if (!name) throw new Error("Search name is required");
+    // WaBot_listUsers.asp?name=...
+    const raw = await callApi("WaBot_listUsers.asp", "GET", null, { name: name.trim() });
+
+    // Normalize to array
+    const users = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+
+    if (users.length === 0) {
+        return { status: "not_found", message: `No users found matching '${name}'` };
+    }
+
+    return {
+        status: "success",
+        users: users.map(u => ({
+            name: u.Name,
+            code: u.Code // Assuming it has a code
+        }))
+    };
 }
 
 async function handleGetDestinations(code) {
@@ -84,14 +156,18 @@ async function handleGetDestinations(code) {
         : destinations;
 }
 
-async function handleGetProducts(customerCode, productNames) {
+async function handleGetProducts(customerCode, destinationId, productNames) {
     if (!customerCode) throw new Error("Customer code is required");
 
     // Normalize productNames to an array
     const namesArray = Array.isArray(productNames) ? productNames : [productNames].filter(Boolean);
 
-    // WaBot_listProd.asp?customerCode=...
-    const products = await callApi("WaBot_listProd.asp", "GET", null, { customerCode });
+    // Build params — destinationId is optional
+    const params = { customerCode };
+    if (destinationId) params.destinationId = destinationId;
+
+    // WaBot_listProd.asp?customerCode=...&destinationId=... (optional)
+    const products = await callApi("WaBot_listProd.asp", "GET", null, params);
 
     if (namesArray.length === 0) {
         return {
@@ -102,7 +178,7 @@ async function handleGetProducts(customerCode, productNames) {
     }
 
     // --- OPENAI CALL LOGIC ---
-    try{
+    try {
         const cohereResults = await getMatchingProducts(products, namesArray);
         return {
             status: "success",
@@ -111,7 +187,7 @@ async function handleGetProducts(customerCode, productNames) {
         };
     } catch (error) {
         console.error("Error in Cohere matching:", error);
-    
+
         const fuse = new Fuse(products, {
             keys: ["Description", "Alias"],
             threshold: 0.3,
@@ -233,9 +309,21 @@ async function handlePlaceOrder(orderData) {
     const response = await callApi("WaBot_createOrd.asp", "POST", orderData);
 
     if (response && response.result === true) {
-        return { status: "order_placed" };
+        return { status: "order_placed", details: response };
     } else {
         return { status: "order_failed", details: response };
+    }
+}
+
+async function handleCreateTask(taskData) {
+    // WaBot_createTask.asp (POST)
+    // Payload: { recipient: "", customerCode: "", destinationId: "", notes: "" }
+    const response = await callApi("WaBot_createTask.asp", "POST", taskData);
+
+    if (response && response.result === true) {
+        return { status: "task_created", details: response };
+    } else {
+        return { status: "task_failed", details: response };
     }
 }
 
@@ -244,7 +332,35 @@ async function handlePlaceOrder(orderData) {
 // Tool: get_customer_details
 server.tool(
     "get_customer_details",
-    "Verify customer identity and fetch details including default destination.",
+    `Verify customer identity and retrieve essential customer information including default destination.
+    
+        This tool performs customer lookup by name to confirm identity and retrieve core customer data. It returns the customer's 
+        unique code, registered name, default delivery destination, and a flag indicating whether the customer has multiple destinations. 
+        This is typically the first step in any order placement workflow.
+        
+        Use this tool when you need to:
+        - Verify and confirm a customer's identity by name
+        - Retrieve a customer's unique code for subsequent API calls
+        - Get the customer's default delivery destination
+        - Determine if you need to prompt the user to select among multiple destinations
+        - Initiate a new order process for a customer
+        
+        Parameters:
+        @param {string} name - The customer's name exactly as registered in the system. The search performs exact matching.
+        
+        Returns:
+        Array<Customer>
+
+        Customer object structure:
+
+        - Code (number): Unique customer identifier.
+        - Name (string): Customer registered name.
+        - DestinationId (number): Default delivery destination ID.
+        - DestinationName (string): Default delivery destination name.
+        - DestinationAddress (string): Full delivery address.
+        - ChooseDestination (number):
+            - 0 → Customer has only one destination. Proceed directly.
+            - 1 → Customer has multiple destinations. You MUST ask the user to select destination before fetching products.`,
     { name: z.string().describe("Customer name exactly as written") },
     async ({ name }) => {
         try {
@@ -259,7 +375,35 @@ server.tool(
 // Tool: get_customer_destinations
 server.tool(
     "get_customer_destinations",
-    "Fetch all destinations for a customer.",
+    `Retrieve all delivery destinations associated with a customer account.
+        
+        This tool fetches the complete list of delivery locations where a customer can receive orders. Each destination 
+        includes its unique identifier, name, full address, and a flag indicating if it's the default delivery location. 
+        Use this tool when a customer has multiple delivery locations and needs to specify where their order should be sent.
+        
+        Use this tool when you need to:
+        - Display all available delivery locations for a customer
+        - Allow the customer to select a specific delivery destination
+        - Verify destination information before placing an order
+        - Check which destination is marked as the customer's default
+        - Ensure the order goes to the correct delivery address
+        
+        Parameters:
+        @param {number} code - The customer's unique code (obtained from get_customer_details).
+        
+        Returns:
+        Array<Destination>
+
+        Destination object structure:
+
+        - DestinationId (number): Unique identifier for the destination.
+        - DestinationName (string): Name or label of the destination (for example: "Main Office", "Warehouse Milano").
+        - DestinationAddress (string): Full delivery address of this destination.
+        - DefaultDestination (boolean): Indicates whether this is the default destination.
+            - true → This is the default destination.
+            - false → This is not the default destination.
+
+    `,
     { code: z.union([z.string(), z.number()]).transform((val) => Number(val)).describe("Customer code") },
     async ({ code }) => {
         try {
@@ -274,14 +418,48 @@ server.tool(
 // Tool: get_customer_products
 server.tool(
     "get_customer_products",
-    "Fetch list of products available for a customer (supports single name or array of names).",
+    `Fetch and search for products available for a specific customer (optionally filtered by delivery destination).
+        This tool retrieves the product catalog for a specific customer and performs intelligent fuzzy matching against product names. It can also optionally filter products by a specific delivery destination, ensuring that only products available for that selected location are returned.
+        The tool uses multi-stage fallback strategies to find matching products even with partial names, spelling variations, or typos. Results are ranked by relevance score, with exact matches prioritized.
+    
+    Use this tool when you need to:
+        - Search for products available for a specific customer
+        - Search for products available for a specific customer and delivery destination
+        - Ensure product availability at a selected delivery location
+        - If a product is not available at a specific destination, it is excluded from results
+        - Browse the full product catalog for a customer (with or without destination filtering)
+        - Handle orders going to different customer destinations with location-specific availability
+        - Respect destination-based inventory or product restrictions
+        - Perform batch searches for multiple product names
+    
+    Parameters:
+    @param {number} customerCode - The unique code/ID of the customer to fetch products for.
+    @param {number} [destinationId] - (Optional) The ID of the delivery destination to filter products by. If not provided, products from all destinations for the customer are returned.
+    @param {string|string[]} productName - The name(s) of the product(s) to search for. Can be a single string 
+                                          or an array of strings. If empty or not provided, returns full catalog.
+    
+    Returns a list of matching products with the following structure for each search term:
+    Array<Product>
+
+    Product object structure:
+    - Code (number): Unique identifier for the product.
+    - Description (string): Detailed description of the product.
+    - Priority (number): Priority level of the product (higher numbers indicate higher priority).
+    - Alias (array of strings): Alternative names or aliases for the product.
+    - score (number): Relevance score as a percentage (0-100).
+    - scoreFormatted (string): Formatted score percentage.
+
+    When multiple matches are found, a "FastOrder_Generico" entry is included with the user's search text to allow for custom selection.
+    If no matches are found, an empty data set is returned.
+    `,
     {
         customerCode: z.coerce.number().describe("Customer code"),
-        productName: z.union([z.array(z.string())]).describe("Product name(s) to search"),
+        destinationId: z.coerce.number().optional().describe("Destination ID (optional)"),
+        productName: z.union([z.string(), z.array(z.string())]).describe("Product name(s) to search"),
     },
-    async ({ customerCode, productName }) => {
+    async ({ customerCode, destinationId, productName }) => {
         try {
-            const result = await handleGetProducts(customerCode, productName);
+            const result = await handleGetProducts(customerCode, destinationId, productName);
             return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
         } catch (error) {
             return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
@@ -292,20 +470,117 @@ server.tool(
 // Tool: place_order_request
 server.tool(
     "place_order_request",
-    "Place the order for the customer.",
+    `Submit and finalize a customer order for processing.
+        
+        This tool submits the complete order details to the backend system for processing. It requires confirmation of the customer, 
+        their selected delivery destination, and itemized list of products with quantities. The system validates all information 
+        and returns a status indicating success or failure. This is the final step in the order workflow and should only be called 
+        after all order details have been confirmed with the customer.
+        
+        Use this tool when you need to:
+        - Finalize and submit an order after customer confirmation
+        - Process an order with specific items and quantities
+        - Send orders to a specific delivery destination
+        - Complete the entire order workflow
+        - Get confirmation that an order has been successfully placed
+        
+        Parameters:
+        @param {number} customerCode - The unique customer code (obtained from get_customer_details).
+        @param {number} destinationId - The ID of the selected delivery destination (obtained from get_customer_destinations).
+        @param {string} [deliveryNotes] - Optional delivery notes or instructions provided by the customer.
+        @param {string} senderMobile - Mobile number of the sender.
+        @param {object[]} items - An array of ordered items, each containing:
+            @param {string} itemCode - The product's unique code identifier
+            @param {string} itemDescription - The product's description/name for reference
+            @param {string} um - Unit of measure for the product (e.g., 'kg', 'units', 'boxes')
+            @param {number} qty - The quantity to order for this item (must be a positive number)
+            @param {string} [itemNotes] - Optional special instructions or notes specific to this individual item (e.g., "fine chopped").
+            @param {number} [price] - Optional price per item (e.g., 10.99)
+            
+        Returns the order submission status with the following structure:
+        
+        - status (string): "order_placed" if the order was successfully submitted, "order_failed" if there was an error.
+        - details (object, optional): Additional information about the order submission result, especially in case of failure.  
+        
+        Important: Always confirm all order details (customer, destination, items, quantities) with the customer before calling this tool.
+        Once submitted, the order cannot be modified through this tool - contact support for changes.
+     `,
     {
         customerCode: z.number().describe("Customer code"),
         destinationId: z.number().describe("Destination ID"),
+        deliveryNotes: z.string().describe("Delivery notes"),
+        senderMobile: z.string().describe("Sender mobile number"),
         items: z.array(z.object({
             itemCode: z.string().describe("Code"),
             itemDescription: z.string().describe("Description"),
             um: z.string().describe("Unit"),
             qty: z.number().describe("Qty"),
+            price: z.number().optional().describe("Price per item (optional)"),
+            itemNotes: z.string().describe("Item notes"),
         })).describe("Items"),
     },
     async (orderData) => {
         try {
             const result = await handlePlaceOrder(orderData);
+            return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        } catch (error) {
+            return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+    }
+);
+// Tool: create_task
+server.tool(
+    "create_task",
+    `Create a new task for a specified recipient or customer with internal notes.
+    
+    Use this tool when the user wants to assign a task or create a reminder. 
+    Notes are mandatory. At least one of 'recipient' or 'customerCode' must be provided.
+    
+    If creating a task for a customer who requires a destination selection (check 'ChooseDestination' or 'ask destination first' from get_customer_details), you MUST also provide 'destinationId'.
+    
+    Parameters:
+    @param {string} [recipient] - (Optional) The internal name or code of the person who will receive the task (e.g., "GUSTAVO").
+    @param {string} [customerCode] - (Optional) The unique code of the customer for whom the task is being created.
+    @param {string|number} [destinationId] - (Optional) The ID of the delivery destination, required if the customer asks for destination first.
+    @param {string} notes - (Mandatory) The detailed description or notes for the task.
+    `,
+    {
+        recipient: z.string().optional().describe("The person who will receive the task"),
+        customerCode: z.string().optional().describe("The customer code"),
+        destinationId: z.union([z.string(), z.number()]).optional().describe("The destination ID"),
+        notes: z.string().describe("The task description/notes"),
+    },
+    async (taskData) => {
+        try {
+            const result = await handleCreateTask(taskData);
+            return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        } catch (error) {
+            return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+        }
+    }
+);
+
+// Tool: get_users
+server.tool(
+    "get_users",
+    `Search for internal users or teams within the organization.
+    
+    Use this tool when you need to find or verify the name of a person who should be assigned to a task. 
+    The tool performs a search (like logic) based on the provided name.
+    
+    Parameters:
+    @param {string} name - The name or partial name of the user to search for.
+    
+    Returns:
+    - status: "success" or "not_found"
+    - users: List of matching users, each with:
+      - code (string): The user's unique code (e.g., "GUSTAVO") — use this as the 'recipient' in create_task.
+      - name (string): The user's full name (e.g., "GUSTAVO MINACCI") — use this for display only.
+    `,
+    { name: z.string().describe("The name to search for (partial match)") },
+    async ({ name }) => {
+        try {
+            const result = await handleGetUsers(name);
             return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
         } catch (error) {
             return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
@@ -351,11 +626,18 @@ app.get("/destinations", async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /products?customerCode=419&productName=A&productName=B
+// GET /users?name=gustavo
+app.get("/users", async (req, res) => {
+    try {
+        res.json(await handleGetUsers(req.query.name));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /products?customerCode=419&destinationId=1&productName=A&productName=B
 app.get("/products", async (req, res) => {
     try {
         // req.query.productName will be an array if multiple are passed, or a string if one is passed.
-        res.json(await handleGetProducts(req.query.customerCode, req.query.productName));
+        res.json(await handleGetProducts(req.query.customerCode, req.query.destinationId, req.query.productName));
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -363,6 +645,13 @@ app.get("/products", async (req, res) => {
 app.post("/order", async (req, res) => {
     try {
         res.json(await handlePlaceOrder(req.body));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /task
+app.post("/task", async (req, res) => {
+    try {
+        res.json(await handleCreateTask(req.body));
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
