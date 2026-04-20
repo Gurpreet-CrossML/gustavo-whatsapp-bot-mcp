@@ -317,7 +317,7 @@ async function handlePlaceOrder(orderData) {
 
 async function handleCreateTask(taskData) {
     // WaBot_createTask.asp (POST)
-    // Payload: { recipient: "", notes: "" }
+    // Payload: { recipient: "", customerCode: "", destinationId: "", notes: "" }
     const response = await callApi("WaBot_createTask.asp", "POST", taskData);
 
     if (response && response.result === true) {
@@ -531,21 +531,23 @@ server.tool(
 // Tool: create_task
 server.tool(
     "create_task",
-    `Create a new task for a specified recipient with internal notes.
+    `Create a new task for a specified recipient or customer with internal notes.
     
-    Use this tool when the user wants to assign a task or create a reminder for a specific person in the organization. 
-    Both recipient and notes are mandatory.
+    Use this tool when the user wants to assign a task or create a reminder. 
+    Notes are mandatory. At least one of 'recipient' or 'customerCode' must be provided.
+    
+    If creating a task for a customer who requires a destination selection (check 'ChooseDestination' or 'ask destination first' from get_customer_details), you MUST also provide 'destinationId'.
     
     Parameters:
-    @param {string} recipient - The internal name or code of the person who will receive the task (e.g., "GUSTAVO").
-    @param {string} notes - The detailed description or notes for the task.
-    
-    Returns:
-    - status (string): "task_created" if successful, "task_failed" otherwise.
-    - details (object): Contains the 'result' and 'idTask' if successful.
+    @param {string} [recipient] - (Optional) The internal name or code of the person who will receive the task (e.g., "GUSTAVO").
+    @param {string} [customerCode] - (Optional) The unique code of the customer for whom the task is being created.
+    @param {string|number} [destinationId] - (Optional) The ID of the delivery destination, required if the customer asks for destination first.
+    @param {string} notes - (Mandatory) The detailed description or notes for the task.
     `,
     {
-        recipient: z.string().describe("The person who will receive the task"),
+        recipient: z.string().optional().describe("The person who will receive the task"),
+        customerCode: z.string().optional().describe("The customer code"),
+        destinationId: z.union([z.string(), z.number()]).optional().describe("The destination ID"),
         notes: z.string().describe("The task description/notes"),
     },
     async (taskData) => {
